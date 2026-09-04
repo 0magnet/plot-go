@@ -10,7 +10,7 @@
 // every browser without asking permission for anything.
 //
 // The picture is drawn into a terminal — xterm-go, the one websh runs on —
-// because asciigraph's output *is* a terminal frame: colours are SGR escapes
+// because asciigraph's output *is* a terminal frame: colors are SGR escapes
 // and the redraw is a cursor-home and a clear. Rendering it anywhere else
 // means reimplementing a terminal badly.
 //
