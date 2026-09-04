@@ -64,8 +64,9 @@ func (s *series) push(v float64) {
 
 func main() {
 	doc := js.Global().Get("document")
-	specIn := doc.Call("getElementById", "spec")
-	errBox := doc.Call("getElementById", "err")
+	if boot := doc.Call("getElementById", "boot"); boot.Truthy() {
+		boot.Call("remove")
+	}
 
 	opts := vt.NewOptions()
 	opts.Scrollback = 0 // a live plot has no history worth keeping
@@ -87,22 +88,22 @@ func main() {
 	lag := &series{name: "event-loop lag ms", color: asciigraph.Blue}
 	all := []*series{frame, lag}
 
-	applySpec := func() {
-		spec := specIn.Get("value").String()
-		for _, s := range all {
-			if err := s.reset(spec); err != nil {
-				errBox.Set("textContent", err.Error())
-				s.reset("") //nolint:errcheck // the empty spec cannot fail
-				return
-			}
+	// The pipeline comes from ?p=, so the page itself stays nothing but the
+	// terminal: ?p=roc:5 or ?p=avg:5|roc:5 the way the command line takes it.
+	spec := "avg:5"
+	if q := js.Global().Get("URLSearchParams").New(
+		js.Global().Get("location").Get("search")); q.Truthy() {
+		if v := q.Call("get", "p"); v.Type() == js.TypeString && v.String() != "" {
+			spec = v.String()
 		}
-		errBox.Set("textContent", "")
 	}
-	applySpec()
-	specIn.Call("addEventListener", "change", js.FuncOf(func(js.Value, []js.Value) any {
-		applySpec()
-		return nil
-	}))
+	specErr := ""
+	for _, s := range all {
+		if err := s.reset(spec); err != nil {
+			specErr = err.Error()
+			s.reset("") //nolint:errcheck // the empty spec cannot fail
+		}
+	}
 
 	perf := js.Global().Get("performance")
 
@@ -177,7 +178,10 @@ func main() {
 		b.WriteString("\x1b[H\x1b[2J")
 		b.WriteString(strings.ReplaceAll(g, "\n", "\r\n"))
 		b.WriteString("\r\n\x1b[2m")
-		b.WriteString(strconv.Itoa(len(frame.out)) + " points · " + strconv.Itoa(cols) + "x" + strconv.Itoa(rows))
+		if specErr != "" {
+			b.WriteString("\x1b[0m\x1b[31m" + specErr + "\x1b[0m\x1b[2m — ")
+		}
+		b.WriteString(spec + " · " + strconv.Itoa(len(frame.out)) + " points")
 		b.WriteString("\x1b[0m")
 		term.WriteString(b.String())
 	}
