@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M1 12 L5 7 L8 9 L15 3' fill='none' stroke='%238ae234' stroke-width='1.6'/%3E%3C/svg%3E">
+<title>plot-go — live counters, plotted as they arrive</title>
+<style>
+  html, body { margin: 0; min-height: 100%; background: #10131a; color: #d3d7cf; }
+  body { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+         padding: 18px; box-sizing: border-box; }
+  .row { display: flex; gap: 18px; align-items: center; flex-wrap: wrap;
+         margin-bottom: 12px; }
+  label { color: #6b7280; }
+  input { background: #171b24; color: #d3d7cf; border: 1px solid #2b3240;
+          border-radius: 4px; padding: 5px 8px; font: inherit; }
+  input:focus { outline: none; border-color: #729fcf; }
+  #spec { width: 16em; }
+  /* The plot is drawn into a terminal, which owns its own font metrics and
+     cell grid — this only gives it somewhere to live. */
+  #term { height: 62vh; min-height: 320px; background: #0b0e14;
+         border: 1px solid #1d222c; border-radius: 4px; padding: 6px; }
+  #err { color: #e8825f; min-height: 1.4em; }
+  .hint { color: #6b7280; }
+  .hint code { color: #8ae234; }
+</style>
+</head>
+<body>
+<div class="row">
+  <span><label for="spec">pipeline</label> <input id="spec" value="avg:5" spellcheck="false"></span>
+  <span class="hint">try <code>avg:9</code>, <code>roc:5</code>, <code>avg:5|roc:5</code>, <code>cma</code></span>
+</div>
+<div id="err"></div>
+<div id="term"></div>
+<p class="hint">
+  The same pipeline spec the command line takes, over two counters this tab
+  has: the gap between animation frames, and how late a zero-millisecond
+  timeout actually runs. Both climb the moment something blocks the loop —
+  scroll the page, or open a heavy tab, and watch. This is what
+  <code>plotnet</code> does to <code>rx_packets</code> and
+  <code>tx_packets</code>, with the counters a browser happens to have.
+</p>
+<script src="wasm_exec.js"></script>
+<script>
+  const go = new Go();
+  WebAssembly.instantiateStreaming(fetch("plot.wasm"), go.importObject)
+    .then((r) => go.run(r.instance))
+    .catch((e) => { document.getElementById("err").textContent = "failed to load: " + e; });
+</script>
+</body>
+</html>
