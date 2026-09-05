@@ -14,7 +14,7 @@ runs. Both climb when the event loop is busy, which is the same reason
 `plotnet` watches `rx_packets` and `tx_packets`. It draws into
 [xterm-go](https://github.com/0magnet/xterm-go) — the terminal
 [websh](https://github.com/0magnet/websh) runs on — because asciigraph's
-output *is* a terminal frame: the colours are SGR escapes and the redraw is a
+output *is* a terminal frame: the colors are SGR escapes and the redraw is a
 cursor-home and a clear.
 
 ```
@@ -201,7 +201,7 @@ rather than being quietly given something else.
 The tick spacing lands exactly every N columns when N divides the width, and as
 near as the columns allow when it does not.
 
-## Licence
+## License
 
 MIT, as the original is. See [LICENSE](LICENSE).
 
