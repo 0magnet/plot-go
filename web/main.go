@@ -101,7 +101,7 @@ func main() {
 	for _, s := range all {
 		if err := s.reset(spec); err != nil {
 			specErr = err.Error()
-			s.reset("") //nolint:errcheck // the empty spec cannot fail
+			s.reset("") //nolint:errcheck,gosec // the empty spec cannot fail
 		}
 	}
 
