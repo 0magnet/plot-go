@@ -1,4 +1,4 @@
 github.com/0magnet/asciigraph v0.0.0-20260823172017-29b8c911efe6 h1:Z3AacnltYYybxmtfO6ZVOJ5xwMd0qRmo4oVIcBKGqIA=
 github.com/0magnet/asciigraph v0.0.0-20260823172017-29b8c911efe6/go.mod h1:ysrIrx3cFUcnv9uisqO2oPho3/OnqMoiGY5coRoIKtw=
-github.com/0magnet/xterm-go v0.0.0-20260913215439-50280f9bd203 h1:7gcGJn40OsCzIBMM+MD3NeJAWmBMcnSTKTlYD1V3gu4=
-github.com/0magnet/xterm-go v0.0.0-20260913215439-50280f9bd203/go.mod h1:W6c6ofSTsxXuQEr1rSZ3qmfOj5a3LGB3uLQBL0/TiKc=
+github.com/0magnet/xterm-go v0.0.0-20260915170035-1ea079f51d60 h1:Joeo8EVcjvXUvPjMqraf7qu+ucd8Rl9RtEcyE+J/HjY=
+github.com/0magnet/xterm-go v0.0.0-20260915170035-1ea079f51d60/go.mod h1:W6c6ofSTsxXuQEr1rSZ3qmfOj5a3LGB3uLQBL0/TiKc=
