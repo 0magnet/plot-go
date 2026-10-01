@@ -4,4 +4,4 @@ go 1.25
 
 require github.com/0magnet/asciigraph v0.0.0-20260823172017-29b8c911efe6
 
-require github.com/0magnet/xterm-go v0.0.0-20260923132223-00c1a8e687cc
+require github.com/0magnet/xterm-go v0.0.0-20260930222525-d3033e9b370a
