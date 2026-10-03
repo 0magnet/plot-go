@@ -507,30 +507,39 @@ type brokenPipe struct{}
 
 func (brokenPipe) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
 
-// Two series crossing overwrite each other unless merging is on, which is what
-// the fork of asciigraph adds.
+// -m joins two lines of one color where they genuinely cross, which is what
+// the fork of asciigraph adds. Lines that only touch, and lines of different
+// colors, still overwrite: a T would say they branch, and a cell has one color.
 func TestMergeJoinsCrossings(t *testing.T) {
-	data := [][]float64{{0, 1}, {1, 0}}
-	o := &opts{prec: 2, colors: []asciigraph.AnsiColor{asciigraph.Default, asciigraph.Default}}
-
-	plain, err := render(o, data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	o.merge = true
-	merged, err := render(o, data)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if plain == merged {
-		t.Errorf("-m changed nothing:\n%s", merged)
-	}
-	for _, want := range []string{"┬", "┴"} {
-		if !strings.Contains(merged, want) {
-			t.Errorf("expected a %q junction in:\n%s", want, merged)
+	same := []asciigraph.AnsiColor{asciigraph.Default, asciigraph.Default}
+	plot := func(data [][]float64, colors []asciigraph.AnsiColor, merge bool) string {
+		t.Helper()
+		out, err := render(&opts{prec: 0, colors: colors, merge: merge}, data)
+		if err != nil {
+			t.Fatal(err)
 		}
+		return out
 	}
+
+	// A flat series at 1 crossed by a jump from 0 to 2.
+	cross := [][]float64{{1, 1, 1, 1}, {0, 0, 2, 2}}
+	if got := plot(cross, same, false); !strings.Contains(got, "─│─") {
+		t.Errorf("without -m the jump should overwrite the flat line:\n%s", got)
+	}
+	if got := plot(cross, same, true); !strings.Contains(got, "─┼─") {
+		t.Errorf("with -m the crossing should be joined:\n%s", got)
+	}
+
+	differ := []asciigraph.AnsiColor{asciigraph.Red, asciigraph.Blue}
+	if got := plot(cross, differ, true); strings.Contains(got, "─┼─") {
+		t.Errorf("lines of different colors should not be joined:\n%s", got)
+	}
+
+	touch := [][]float64{{0, 1}, {1, 0}}
+	if plain, merged := plot(touch, same, false), plot(touch, same, true); plain != merged {
+		t.Errorf("lines that only touch should not be joined:\n%s", merged)
+	}
+
 	if _, err := parse([]string{"-m"}); err != nil {
 		t.Errorf("-m was rejected: %v", err)
 	}
