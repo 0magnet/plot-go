@@ -115,6 +115,13 @@ one belongs to the next source and is appended to the default.
 This ordering is why the flags are parsed by hand rather than with the `flag`
 package, which does not preserve the order flags were given in.
 
+## Plot size, bounds and caption
+
+`-d height:width` sets the plot size and `-w` sets the width alone; either field
+of `-d` may be left out. `-b min:max` fixes the bounds, and leaving one end out
+leaves that end automatic. `-t` prints a caption under the plot, and `-s ascii`
+or `-s unicode` picks the character set.
+
 ## Portability
 
 No cgo and no syscalls beyond `os`, so it runs where Go runs. The same test
@@ -127,7 +134,7 @@ make test-browser   # js/wasm, in a headless browser
 make test-tinygo    # TinyGo, plus the wasip1 and wasm builds
 ```
 
-TinyGo compiles it to a 1.1 MB wasm module, and to a native binary that polls a
+TinyGo compiles `cmd/plot-go` to a 1.1 MB wasm module, and to a native binary that polls a
 `/sys` counter exactly as the Go build does.
 
 Only `OpenSource` touches the host at all — files and standard input. Everything
@@ -174,7 +181,9 @@ underneath:
 
 This needed a change in asciigraph, which had no way to express it. It is
 [`MergeSeries()` on a branch of the fork][merge-branch], which this repository
-depends on by `replace` until it lands upstream.
+requires at a pseudo-version, taken from the fork's `fork-merge-series` branch,
+until it lands upstream. The upstream pull request is from a separate branch,
+`merge-series-crossings`.
 
 `-x every:offset:mod` labels the x axis: one label every N columns, counting
 from an offset, wrapping at a modulus — so `-x 10:0:60` counts seconds up to a
@@ -186,7 +195,7 @@ $ seq 1 41 | plot-go -d 3 -x 10
         0        10        20        30        40
 ```
 
-[merge-branch]: https://github.com/0magnet/asciigraph/tree/merge-series-crossings
+[merge-branch]: https://github.com/0magnet/asciigraph/tree/fork-merge-series
 
 ## Flags the original has that mean less here
 
