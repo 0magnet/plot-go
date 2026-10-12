@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // Port of src/common/InputHandler.ts — the terminal's implementation
@@ -191,14 +192,17 @@ type InputHandler struct {
 
 	activeBuffer *Buffer
 
-	parseBuffer   []uint32
 	stringDecoder StringToUtf32
 	utf8Decoder   Utf8ToUtf32
 
 	windowTitle      string
 	iconName         string
 	windowTitleStack []string
-	iconNameStack    []string
+
+	// kittyMain and kittyAlt are each screen's stack of kitty keyboard
+	// flags (kittykeys.go).
+	kittyMain, kittyAlt []int
+	iconNameStack       []string
 
 	curAttrData           *AttributeData
 	eraseAttrDataInternal *AttributeData
@@ -219,6 +223,26 @@ type InputHandler struct {
 	OnScroll                      func(ydisp int)
 	OnTitleChange                 func(title string)
 	OnColor                       func(events []ColorEvent)
+	// OnSixel receives each sixel picture (sixel.go). Sixel is decoded, and
+	// advertised, only while it is set and Options.Sixel is on.
+	OnSixel func(img *SixelImage)
+	// OnSixelGeometry, when set, is the text area in pixels, which is how
+	// big a picture XTSMGRAPHICS tells a program to draw.
+	OnSixelGeometry func() (w, h int)
+
+	// sixelPalette is the color registers, shared by every sixel picture.
+	sixelPalette SixelPalette
+	// sixelWanted, when set, says whether OnSixel goes anywhere: the
+	// Terminal forwards it, and only an embedder listening there can draw.
+	sixelWanted func() bool
+
+	// OnPointerShape is told the CSS cursor programs have asked for with
+	// OSC 22 (pointer.go), or "" for the terminal's own.
+	OnPointerShape func(css string)
+	// pointerMain and pointerAlt are each screen's stack of pointer shapes.
+	pointerMain, pointerAlt []string
+	// commands are the OSC 133 marks, oldest first (semantic.go).
+	commands []*commandMark
 }
 
 // NewInputHandler creates the handler and registers all sequence
@@ -232,7 +256,6 @@ func NewInputHandler(bufferService *BufferService, charsetService *CharsetServic
 		mouseService:          mouseService,
 		oscLinkService:        oscLinkService,
 		options:               options,
-		parseBuffer:           make([]uint32, 4096),
 		curAttrData:           NewAttributeData(),
 		eraseAttrDataInternal: NewAttributeData(),
 	}
@@ -248,6 +271,12 @@ func NewInputHandler(bufferService *BufferService, charsetService *CharsetServic
 			prevActivate(active, inactive)
 		}
 		h.activeBuffer = active
+		// The alternate screen is new each time it is entered, and so is its
+		// pointer.
+		if active == bufferService.Buffers.Normal() {
+			h.pointerAlt = h.pointerAlt[:0]
+		}
+		h.pointerChanged()
 	}
 
 	p := h.parser
@@ -300,6 +329,11 @@ func NewInputHandler(bufferService *BufferService, charsetService *CharsetServic
 	p.RegisterCsiHandler(FunctionID{Final: "r"}, h.SetScrollRegion)
 	p.RegisterCsiHandler(FunctionID{Final: "s"}, func(params *Params) bool { return h.SaveCursor() })
 	p.RegisterCsiHandler(FunctionID{Final: "t"}, h.WindowOptionsHandler)
+	p.RegisterCsiHandler(FunctionID{Prefix: ">", Final: "q"}, h.ReportVersion)
+	p.RegisterCsiHandler(FunctionID{Prefix: "?", Final: "u"}, h.kittyQuery)
+	p.RegisterCsiHandler(FunctionID{Prefix: ">", Final: "u"}, h.kittyPush)
+	p.RegisterCsiHandler(FunctionID{Prefix: "<", Final: "u"}, h.kittyPop)
+	p.RegisterCsiHandler(FunctionID{Prefix: "=", Final: "u"}, h.kittySet)
 	p.RegisterCsiHandler(FunctionID{Final: "u"}, func(params *Params) bool { return h.RestoreCursor() })
 	p.RegisterCsiHandler(FunctionID{Intermediates: "'", Final: "}"}, h.InsertColumns)
 	p.RegisterCsiHandler(FunctionID{Intermediates: "'", Final: "~"}, h.DeleteColumns)
@@ -331,6 +365,8 @@ func NewInputHandler(bufferService *BufferService, charsetService *CharsetServic
 	p.RegisterOscHandler(10, NewOscHandler(h.SetOrReportFgColor))
 	p.RegisterOscHandler(11, NewOscHandler(h.SetOrReportBgColor))
 	p.RegisterOscHandler(12, NewOscHandler(h.SetOrReportCursorColor))
+	p.RegisterOscHandler(22, NewOscHandler(h.SetPointerShape))
+	p.RegisterOscHandler(133, NewOscHandler(h.SemanticPrompt))
 	p.RegisterOscHandler(104, NewOscHandler(h.RestoreIndexedColor))
 	p.RegisterOscHandler(110, NewOscHandler(h.RestoreFgColor))
 	p.RegisterOscHandler(111, NewOscHandler(h.RestoreBgColor))
@@ -363,6 +399,9 @@ func NewInputHandler(bufferService *BufferService, charsetService *CharsetServic
 
 	// DCS handler
 	p.RegisterDcsHandler(FunctionID{Intermediates: "$", Final: "q"}, NewDcsHandler(h.RequestStatusString))
+	p.RegisterDcsHandler(FunctionID{Final: "q"}, &sixelHandler{h: h})
+	p.RegisterCsiHandler(FunctionID{Prefix: "?", Final: "S"}, h.GraphicsAttributes)
+	h.sixelPalette = DefaultSixelPalette()
 
 	return h
 }
@@ -379,8 +418,8 @@ func (h *InputHandler) getCurrentLinkID() int {
 
 // Parse decodes and parses a chunk of UTF-8 pty output.
 func (h *InputHandler) Parse(data []byte) {
-	h.parseWith(len(data), func(start, end int) int {
-		return h.utf8Decoder.Decode(data[start:end], h.parseBuffer)
+	h.parseWith(len(data), func(buf []uint32, start, end int) int {
+		return h.utf8Decoder.Decode(data[start:end], buf)
 	})
 }
 
@@ -389,19 +428,26 @@ func (h *InputHandler) Parse(data []byte) {
 // surrogates).
 func (h *InputHandler) ParseString(data string) {
 	units := utf16Units(data)
-	h.parseWith(len(units), func(start, end int) int {
-		return h.stringDecoder.Decode(units[start:end], h.parseBuffer)
+	h.parseWith(len(units), func(buf []uint32, start, end int) int {
+		return h.stringDecoder.Decode(units[start:end], buf)
 	})
 }
 
-func (h *InputHandler) parseWith(length int, decode func(start, end int) int) {
+// parseBuffers holds the decode buffers, shared by every terminal in the
+// process. A buffer is only needed for the length of one write, and one kept
+// per terminal stays as large as the largest write it ever had: up to 512 KiB.
+var parseBuffers = sync.Pool{New: func() any { return new([]uint32) }}
+
+func (h *InputHandler) parseWith(length int, decode func(buf []uint32, start, end int) int) {
 	cursorStartX := h.activeBuffer.X
 	cursorStartY := h.activeBuffer.Y
 
-	// resize input buffer if needed
-	if len(h.parseBuffer) < length && len(h.parseBuffer) < maxParseBufferLength {
-		h.parseBuffer = make([]uint32, min(length, maxParseBufferLength))
+	bufp := parseBuffers.Get().(*[]uint32)
+	defer parseBuffers.Put(bufp)
+	if need := min(length, maxParseBufferLength); len(*bufp) < need {
+		*bufp = make([]uint32, need)
 	}
+	buf := *bufp
 
 	// Clear the dirty row tracker so we know which lines changed
 	h.dirtyTracker.clearRange()
@@ -409,8 +455,8 @@ func (h *InputHandler) parseWith(length int, decode func(start, end int) int) {
 	// process big data in smaller chunks
 	for i := 0; i < length; i += maxParseBufferLength {
 		end := min(i+maxParseBufferLength, length)
-		n := decode(i, end)
-		h.parser.Parse(h.parseBuffer, n)
+		n := decode(buf, i, end)
+		h.parser.Parse(buf, n)
 	}
 
 	if h.activeBuffer.X != cursorStartX || h.activeBuffer.Y != cursorStartY {
@@ -451,6 +497,10 @@ func (h *InputHandler) Print(data []uint32, start, end int) {
 	}
 
 	precedingJoinState := uint32(h.parser.PrecedingJoinState) // #nosec G115 -- Unicode codepoints and the parser's join state
+	charProperties := CharProperties
+	if h.coreService.DecPrivateModes.GraphemeClustering {
+		charProperties = GraphemeCharProperties
+	}
 	for pos := start; pos < end; pos++ {
 		code := data[pos]
 
@@ -461,7 +511,7 @@ func (h *InputHandler) Print(data []uint32, start, end int) {
 			}
 		}
 
-		currentInfo := CharProperties(code, precedingJoinState)
+		currentInfo := charProperties(code, precedingJoinState)
 		chWidth := ExtractWidth(currentInfo)
 		shouldJoin := ExtractShouldJoin(currentInfo)
 		oldWidth := 0
@@ -589,6 +639,12 @@ func (h *InputHandler) RegisterEscHandler(id FunctionID, callback EscHandler) {
 // RegisterOscHandler forwards custom OSC handlers to the parser.
 func (h *InputHandler) RegisterOscHandler(ident int, callback func(data string) bool) {
 	h.parser.RegisterOscHandler(ident, NewOscHandler(callback))
+}
+
+// SetApcHandler sets what takes an APC string (ESC _ ... ESC \), whole: the
+// transport of kitty's graphics protocol. Without one they are dropped.
+func (h *InputHandler) SetApcHandler(callback func(data string) bool) {
+	h.parser.SetApcHandler(callback)
 }
 
 // Bell rings the bell (BEL).
@@ -1163,7 +1219,12 @@ func (h *InputHandler) SendDeviceAttributesPrimary(params *Params) bool {
 	if paramAt(params, 0) > 0 {
 		return true
 	}
-	if h.is("xterm") || h.is("rxvt-unicode") || h.is("screen") {
+	if h.sixelActive() {
+		// What xterm.js's image addon answers: a VT220 (62) with sixel (4),
+		// national charsets (9) and ANSI color (22). The 4 is how a program
+		// finds out it may draw sixel.
+		h.coreService.TriggerDataEvent(c0ESC+"[?62;4;9;22c", false)
+	} else if h.is("xterm") || h.is("rxvt-unicode") || h.is("screen") {
 		h.coreService.TriggerDataEvent(c0ESC+"[?1;2c", false)
 	} else if h.is("linux") {
 		h.coreService.TriggerDataEvent(c0ESC+"[?6c", false)
@@ -1278,6 +1339,9 @@ func (h *InputHandler) SetModePrivate(params *Params) bool {
 			h.coreService.DecPrivateModes.BracketedPasteMode = true
 		case 2026: // synchronized output
 			h.coreService.DecPrivateModes.SynchronizedOutput = true
+		case 2027: // grapheme cluster mode
+			h.coreService.DecPrivateModes.GraphemeClustering = true
+			h.parser.PrecedingJoinState = 0
 		}
 	}
 	return true
@@ -1356,6 +1420,9 @@ func (h *InputHandler) ResetModePrivate(params *Params) bool {
 			if h.OnRequestRefreshRows != nil {
 				h.OnRequestRefreshRows(-1, -1)
 			}
+		case 2027:
+			h.coreService.DecPrivateModes.GraphemeClustering = false
+			h.parser.PrecedingJoinState = 0
 		}
 	}
 	return true
@@ -1462,6 +1529,8 @@ func (h *InputHandler) RequestMode(params *Params, ansi bool) bool {
 		return f(p, b2v(dm.BracketedPasteMode))
 	case 2026:
 		return f(p, b2v(dm.SynchronizedOutput))
+	case 2027:
+		return f(p, b2v(dm.GraphemeClustering))
 	}
 	return f(p, modeNotRecognized)
 }
@@ -1752,6 +1821,21 @@ func (h *InputHandler) SetScrollRegion(params *Params) bool {
 		h.activeBuffer.ScrollBottom = bottom - 1
 		h.setCursor(0, 0)
 	}
+	return true
+}
+
+// ReportVersion answers XTVERSION (CSI > q) with DCS > | name ST: which
+// terminal this is, for a program that adapts to it. Only the parameter 0
+// (or none) is defined.
+func (h *InputHandler) ReportVersion(params *Params) bool {
+	if paramAt(params, 0) != 0 {
+		return true
+	}
+	name := h.options.XTVersion
+	if name == "" {
+		name = "xterm-go"
+	}
+	h.coreService.TriggerDataEvent(c0ESC+"P>|"+name+c0ESC+"\\", false)
 	return true
 }
 
@@ -2087,6 +2171,10 @@ func (h *InputHandler) FullReset() bool {
 func (h *InputHandler) Reset() {
 	h.curAttrData = NewAttributeData()
 	h.eraseAttrDataInternal = NewAttributeData()
+	h.sixelPalette = DefaultSixelPalette()
+	h.pointerMain, h.pointerAlt = nil, nil
+	h.resetCommands()
+	h.pointerChanged()
 }
 
 // eraseAttrData implements the back_color_erase feature: erased cells

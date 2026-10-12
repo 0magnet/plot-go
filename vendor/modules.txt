@@ -1,7 +1,7 @@
 # github.com/0magnet/asciigraph v0.0.0-20260823172017-29b8c911efe6
 ## explicit; go 1.11
 github.com/0magnet/asciigraph
-# github.com/0magnet/xterm-go v0.0.0
+# github.com/0magnet/xterm-go v0.0.1-0.20261011000522-9adb4a350db6
 ## explicit; go 1.24
 github.com/0magnet/xterm-go
 github.com/0magnet/xterm-go/vt
