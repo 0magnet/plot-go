@@ -219,7 +219,9 @@ MIT, as the original is. See [LICENSE](LICENSE).
 Made with [goda](https://github.com/loov/goda):
 
 ```
-go run github.com/loov/goda@latest graph github.com/0magnet/plot-go/... | dot -Tsvg -o docs/plot-go-goda-graph.svg
+# GOOS=js: the import edges of a wasm program live in js/wasm-tagged
+# files and are invisible to a host-context run
+GOOS=js GOARCH=wasm go run github.com/loov/goda@latest graph github.com/0magnet/plot-go/... | dot -Tsvg -o docs/plot-go-goda-graph.svg
 ```
 
 ![Dependency Graph](docs/plot-go-goda-graph.svg "github.com/0magnet/plot-go Dependency Graph")
